@@ -1,0 +1,6 @@
+node_modules/
+cantares.db
+cantares.sqlite
+cantares.json
+*.log
+.env

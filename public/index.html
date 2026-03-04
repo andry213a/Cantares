@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cantares - Mensajeria</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="auth" id="auth">
+      <div class="auth-card">
+        <div class="brand">
+          <div class="logo">C</div>
+          <div>
+            <div class="title">Cantares</div>
+            <div class="subtitle">Mensajeria minimalista</div>
+          </div>
+        </div>
+
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-auth="login">Entrar</button>
+          <button class="auth-tab" data-auth="register">Crear cuenta</button>
+        </div>
+
+        <form class="auth-form" id="loginForm">
+          <label>
+            Usuario
+            <input type="text" name="username" autocomplete="username" required />
+          </label>
+          <label>
+            Contrasena
+            <input type="password" name="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit" class="primary">Entrar</button>
+        </form>
+
+        <form class="auth-form hidden" id="registerForm">
+          <label>
+            Nombre para mostrar
+            <input type="text" name="displayName" autocomplete="name" required />
+          </label>
+          <label>
+            Usuario
+            <input type="text" name="username" autocomplete="username" required />
+          </label>
+          <label>
+            Contrasena
+            <input type="password" name="password" autocomplete="new-password" required />
+          </label>
+          <button type="submit" class="primary">Crear cuenta</button>
+        </form>
+
+        <div class="auth-error" id="authError"></div>
+      </div>
+    </div>
+
+    <div class="app hidden" id="app">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand">
+          <div class="logo">C</div>
+          <div>
+            <div class="title">Cantares</div>
+            <div class="subtitle">Mensajeria minimalista</div>
+          </div>
+        </div>
+
+        <div class="user-pill">
+          <div class="user-info">
+            <div class="avatar" id="activeAvatar">U</div>
+            <div>
+              <div class="user-name" id="activeUser">Usuario</div>
+              <div class="user-handle" id="activeHandle">@usuario</div>
+            </div>
+          </div>
+          <div class="user-actions">
+            <button class="tiny" id="profileBtn">Perfil</button>
+            <button class="tiny" id="logoutBtn">Salir</button>
+          </div>
+        </div>
+
+        <nav class="tabs" id="tabs">
+          <button class="tab active" data-tab="global">Global</button>
+          <button class="tab" data-tab="group">Grupos</button>
+          <button class="tab" data-tab="dm">Privados</button>
+          <button class="tab" data-tab="friends">Amistades</button>
+        </nav>
+
+        <div class="search">
+          <input id="searchInput" type="search" placeholder="Buscar chat o amigo" />
+        </div>
+
+        <div class="list" id="list"></div>
+      </aside>
+
+      <main class="main">
+        <header class="chat-header">
+          <button class="back" id="backBtn" aria-label="Volver">&larr;</button>
+          <div class="chat-meta">
+            <div class="chat-title" id="chatTitle">Chat</div>
+            <div class="chat-info" id="chatInfo">Descripcion</div>
+          </div>
+          <div class="actions">
+            <button class="ghost" id="pinBtn">Pin</button>
+            <button class="ghost" id="chatSettingsBtn">Ajustes</button>
+            <button class="ghost" id="viewProfileBtn">Perfil</button>
+            <button class="ghost" id="addMemberBtn">+ Invitar</button>
+          </div>
+        </header>
+
+        <div class="pinned hidden" id="pinnedBar"></div>
+
+        <section class="messages" id="messages"></section>
+
+        <div class="recording hidden" id="recordingBadge">Grabando mensaje de voz...</div>
+
+        <div class="reply-bar hidden" id="replyBar">
+          <div class="reply-text" id="replyText"></div>
+          <button type="button" class="ghost tiny" id="replyClose">x</button>
+        </div>
+
+        <form class="composer" id="composer" autocomplete="off">
+          <div class="composer-menu">
+            <button type="button" class="ghost" id="attachBtn">+</button>
+            <div class="menu hidden" id="attachMenu">
+              <label class="menu-item">
+                Archivo
+                <input type="file" id="fileInput" />
+              </label>
+              <button type="button" class="menu-item" id="pollBtn">Encuesta</button>
+              <button type="button" class="menu-item" id="eventBtn">Evento</button>
+            </div>
+          </div>
+          <input id="messageInput" type="text" placeholder="Escribe un mensaje" />
+          <button type="submit">Enviar</button>
+          <button type="button" class="ghost voice-btn" id="voiceBtn">Voz</button>
+        </form>
+      </main>
+    </div>
+
+    <div class="modal hidden" id="profileModal">
+      <div class="modal-card">
+        <button class="modal-close" id="profileClose" aria-label="Cerrar">x</button>
+        <div id="profileContent"></div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="chatModal">
+      <div class="modal-card">
+        <button class="modal-close" id="chatClose" aria-label="Cerrar">x</button>
+        <div id="chatContent"></div>
+      </div>
+    </div>
+
+    <footer class="footer-note">
+      Creado por Andry Rodríguez Almánzar. Si notas alguna anomalía visual o falta de contenido,
+      te recomiendo recargar la página para restablecer la vista.
+    </footer>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
