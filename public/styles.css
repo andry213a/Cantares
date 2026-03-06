@@ -725,7 +725,10 @@ html[data-theme="dark"] .message audio {
 }
 
 .pinned span {
-  display: inline;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--pinned-lines, 3);
+  overflow: hidden;
   white-space: normal;
   word-break: break-word;
 }
@@ -1046,7 +1049,7 @@ html[data-theme="dark"] .message audio {
   .pinned span {
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: var(--pinned-lines, 2);
     overflow: hidden;
   }
 

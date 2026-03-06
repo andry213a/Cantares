@@ -886,6 +886,39 @@ function formatPinnedPreview(message) {
   return message.text || "Mensaje";
 }
 
+let pinnedResizeTimer = null;
+
+function adjustPinnedClamp(container) {
+  if (!container || container.classList.contains("hidden")) return;
+  const text = container.querySelector("span");
+  if (!text) return;
+  const style = getComputedStyle(text);
+  let lineHeight = parseFloat(style.lineHeight);
+  if (!lineHeight || Number.isNaN(lineHeight)) {
+    const fontSize = parseFloat(style.fontSize);
+    lineHeight = fontSize ? fontSize * 1.3 : 14;
+  }
+  const prevClamp = text.style.getPropertyValue("-webkit-line-clamp");
+  text.style.setProperty("-webkit-line-clamp", "unset");
+  const fullHeight = text.scrollHeight || text.getBoundingClientRect().height;
+  const lines = Math.max(1, Math.round(fullHeight / lineHeight));
+  const maxLines = window.matchMedia("(max-width: 600px)").matches ? 2 : 3;
+  const clamp = Math.min(lines, maxLines);
+  if (prevClamp) {
+    text.style.setProperty("-webkit-line-clamp", prevClamp);
+  } else {
+    text.style.removeProperty("-webkit-line-clamp");
+  }
+  text.style.setProperty("--pinned-lines", String(clamp));
+}
+
+function schedulePinnedClamp() {
+  if (pinnedResizeTimer) window.clearTimeout(pinnedResizeTimer);
+  pinnedResizeTimer = window.setTimeout(() => {
+    adjustPinnedClamp(dom.pinnedBar);
+  }, 80);
+}
+
 function formatReplySnippet(message) {
   if (!message) return "";
   if (message.deletedAt) return "Mensaje eliminado";
@@ -1342,6 +1375,7 @@ function renderMain() {
     text.textContent = formatPinnedPreview(pinnedMessage);
     dom.pinnedBar.appendChild(label);
     dom.pinnedBar.appendChild(text);
+    adjustPinnedClamp(dom.pinnedBar);
     if (pinnedUntil) {
       const until = new Date(pinnedUntil);
       const stamp = `${String(until.getHours()).padStart(2, "0")}:${String(
@@ -3412,6 +3446,7 @@ async function bootstrap() {
     if (window.innerWidth >= 900) {
       dom.app.classList.remove("show-list");
     }
+    schedulePinnedClamp();
   });
 
   if (state.token) {
