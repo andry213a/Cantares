@@ -902,7 +902,7 @@ function adjustPinnedClamp(container) {
   text.style.setProperty("-webkit-line-clamp", "unset");
   const fullHeight = text.scrollHeight || text.getBoundingClientRect().height;
   const lines = Math.max(1, Math.round(fullHeight / lineHeight));
-  const maxLines = window.matchMedia("(max-width: 600px)").matches ? 2 : 3;
+  const maxLines = window.matchMedia("(min-width: 1200px)").matches ? 3 : 2;
   const clamp = Math.min(lines, maxLines);
   if (prevClamp) {
     text.style.setProperty("-webkit-line-clamp", prevClamp);
