@@ -1028,6 +1028,28 @@ html[data-theme="dark"] .message audio {
 }
 
 @media (max-width: 600px) {
+  body {
+    background: var(--bg);
+  }
+
+  body::before {
+    opacity: 0.08;
+    background-size: 20px 20px;
+  }
+
+  .pinned {
+    padding: 4px 8px;
+    font-size: 10px;
+    margin-top: 6px;
+  }
+
+  .pinned span {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
   .sidebar {
     padding: 18px 14px;
   }

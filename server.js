@@ -12,6 +12,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = path.join(DATA_DIR, "cantares.json");
 const DB_BACKEND = (process.env.DB_BACKEND || "json").toLowerCase();
 const SQLITE_PATH = process.env.DB_FILE || path.join(DATA_DIR, "cantares.sqlite");
+const POSTGRES_URL = process.env.DATABASE_URL || "";
 
 const MAX_AVATAR_SIZE = 600000;
 const MAX_AUDIO_SIZE = 1400000;
@@ -68,6 +69,17 @@ const loginAttempts = new Map();
 const registerAttempts = new Map();
 
 let sqliteDb = null;
+let pgPool = null;
+
+function loadPostgres() {
+  if (pgPool) return pgPool;
+  if (!POSTGRES_URL) {
+    throw new Error("DATABASE_URL no configurado para Postgres");
+  }
+  const { Pool } = require("pg");
+  pgPool = new Pool({ connectionString: POSTGRES_URL, ssl: { rejectUnauthorized: false } });
+  return pgPool;
+}
 function loadSqlite() {
   if (sqliteDb) return sqliteDb;
   const Database = require("better-sqlite3");
@@ -94,6 +106,387 @@ function writeSqliteDb(data) {
   db.prepare("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)").run("db", value);
 }
 
+async function ensurePostgresSchema() {
+  const pool = loadPostgres();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS counters (kind TEXT PRIMARY KEY, value INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY,
+      username TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at BIGINT NOT NULL,
+      avatar TEXT NOT NULL,
+      bio TEXT NOT NULL,
+      info TEXT NOT NULL,
+      location TEXT NOT NULL,
+      website TEXT NOT NULL,
+      status TEXT NOT NULL,
+      profile_theme JSONB NOT NULL,
+      custom_themes JSONB NOT NULL,
+      app_theme JSONB NOT NULL,
+      app_settings JSONB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS chats (
+      id INTEGER PRIMARY KEY,
+      type TEXT NOT NULL,
+      name TEXT,
+      description TEXT NOT NULL,
+      avatar TEXT NOT NULL,
+      settings JSONB NOT NULL,
+      pinned_message_id INTEGER,
+      pinned_by INTEGER,
+      pinned_until BIGINT,
+      tags JSONB NOT NULL,
+      created_by INTEGER,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS chat_members (
+      chat_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY,
+      chat_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      audio TEXT,
+      file JSONB,
+      poll JSONB,
+      event JSONB,
+      reply JSONB,
+      reactions JSONB NOT NULL,
+      expire_at BIGINT,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT,
+      deleted_at BIGINT
+    );
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      id INTEGER PRIMARY KEY,
+      from_id INTEGER NOT NULL,
+      to_id INTEGER NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS group_invites (
+      id INTEGER PRIMARY KEY,
+      chat_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      invited_by INTEGER NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS friends (
+      user_id INTEGER NOT NULL,
+      friend_id INTEGER NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS blocks (
+      user_id INTEGER NOT NULL,
+      blocked_id INTEGER NOT NULL,
+      created_at BIGINT NOT NULL,
+      was_friend BOOLEAN NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS chat_bans (
+      chat_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS chat_requests (
+      chat_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+  `);
+}
+
+async function readPostgresDb() {
+  await ensurePostgresSchema();
+  const pool = loadPostgres();
+  const [
+    counters,
+    users,
+    sessions,
+    chats,
+    chatMembers,
+    messages,
+    friendRequests,
+    groupInvites,
+    friends,
+    blocks,
+    chatBans,
+    chatRequests,
+  ] = await Promise.all([
+    pool.query("SELECT kind, value FROM counters"),
+    pool.query("SELECT * FROM users"),
+    pool.query("SELECT * FROM sessions"),
+    pool.query("SELECT * FROM chats"),
+    pool.query("SELECT * FROM chat_members"),
+    pool.query("SELECT * FROM messages"),
+    pool.query("SELECT * FROM friend_requests"),
+    pool.query("SELECT * FROM group_invites"),
+    pool.query("SELECT * FROM friends"),
+    pool.query("SELECT * FROM blocks"),
+    pool.query("SELECT * FROM chat_bans"),
+    pool.query("SELECT * FROM chat_requests"),
+  ]);
+
+  const countersObj = { users: 0, chats: 0, messages: 0, friendRequests: 0, invites: 0 };
+  counters.rows.forEach((row) => {
+    countersObj[row.kind] = Number(row.value) || 0;
+  });
+
+  return {
+    counters: countersObj,
+    users: users.rows.map((row) => ({
+      id: row.id,
+      username: row.username,
+      displayName: row.display_name,
+      passwordHash: row.password_hash,
+      createdAt: Number(row.created_at),
+      avatar: row.avatar,
+      bio: row.bio,
+      info: row.info,
+      location: row.location,
+      website: row.website,
+      status: row.status,
+      profileTheme: row.profile_theme || { ...DEFAULT_THEME },
+      customThemes: row.custom_themes || [],
+      appTheme: row.app_theme || { ...DEFAULT_APP_THEME },
+      appSettings: row.app_settings || { ...DEFAULT_APP_SETTINGS },
+    })),
+    sessions: sessions.rows.map((row) => ({
+      token: row.token,
+      userId: row.user_id,
+      createdAt: Number(row.created_at),
+    })),
+    chats: chats.rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      name: row.name,
+      description: row.description,
+      avatar: row.avatar,
+      settings: row.settings || { ...DEFAULT_CHAT_SETTINGS },
+      pinnedMessageId: row.pinned_message_id ?? null,
+      pinnedBy: row.pinned_by ?? null,
+      pinnedUntil: row.pinned_until ?? null,
+      tags: row.tags || [],
+      createdBy: row.created_by ?? null,
+      createdAt: Number(row.created_at),
+    })),
+    chatMembers: chatMembers.rows.map((row) => ({
+      chatId: row.chat_id,
+      userId: row.user_id,
+      role: row.role,
+      createdAt: Number(row.created_at),
+    })),
+    messages: messages.rows.map((row) => ({
+      id: row.id,
+      chatId: row.chat_id,
+      userId: row.user_id,
+      type: row.type,
+      content: row.content,
+      audio: row.audio,
+      file: row.file,
+      poll: row.poll,
+      event: row.event,
+      reply: row.reply,
+      reactions: row.reactions || {},
+      expireAt: row.expire_at ?? null,
+      createdAt: Number(row.created_at),
+      updatedAt: row.updated_at ?? null,
+      deletedAt: row.deleted_at ?? null,
+    })),
+    friendRequests: friendRequests.rows.map((row) => ({
+      id: row.id,
+      fromId: row.from_id,
+      toId: row.to_id,
+      createdAt: Number(row.created_at),
+    })),
+    groupInvites: groupInvites.rows.map((row) => ({
+      id: row.id,
+      chatId: row.chat_id,
+      userId: row.user_id,
+      invitedBy: row.invited_by,
+      createdAt: Number(row.created_at),
+    })),
+    friends: friends.rows.map((row) => ({
+      userId: row.user_id,
+      friendId: row.friend_id,
+      createdAt: Number(row.created_at),
+    })),
+    blocks: blocks.rows.map((row) => ({
+      userId: row.user_id,
+      blockedId: row.blocked_id,
+      createdAt: Number(row.created_at),
+      wasFriend: Boolean(row.was_friend),
+    })),
+    chatBans: chatBans.rows.map((row) => ({
+      chatId: row.chat_id,
+      userId: row.user_id,
+      createdAt: Number(row.created_at),
+    })),
+    chatRequests: chatRequests.rows.map((row) => ({
+      chatId: row.chat_id,
+      userId: row.user_id,
+      createdAt: Number(row.created_at),
+    })),
+  };
+}
+
+async function writePostgresDb(data) {
+  await ensurePostgresSchema();
+  const pool = loadPostgres();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("TRUNCATE counters, users, sessions, chats, chat_members, messages, friend_requests, group_invites, friends, blocks, chat_bans, chat_requests");
+
+    const counterRows = Object.entries(data.counters || {});
+    for (const [kind, value] of counterRows) {
+      await client.query("INSERT INTO counters (kind, value) VALUES ($1, $2)", [kind, value]);
+    }
+
+    for (const user of data.users || []) {
+      await client.query(
+        `INSERT INTO users (id, username, display_name, password_hash, created_at, avatar, bio, info, location, website, status, profile_theme, custom_themes, app_theme, app_settings)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [
+          user.id,
+          user.username,
+          user.displayName,
+          user.passwordHash,
+          user.createdAt,
+          user.avatar || "",
+          user.bio || "",
+          user.info || "",
+          user.location || "",
+          user.website || "",
+          user.status || "",
+          user.profileTheme || { ...DEFAULT_THEME },
+          user.customThemes || [],
+          user.appTheme || { ...DEFAULT_APP_THEME },
+          user.appSettings || { ...DEFAULT_APP_SETTINGS },
+        ]
+      );
+    }
+
+    for (const session of data.sessions || []) {
+      await client.query(
+        "INSERT INTO sessions (token, user_id, created_at) VALUES ($1,$2,$3)",
+        [session.token, session.userId, session.createdAt]
+      );
+    }
+
+    for (const chat of data.chats || []) {
+      await client.query(
+        `INSERT INTO chats (id, type, name, description, avatar, settings, pinned_message_id, pinned_by, pinned_until, tags, created_by, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [
+          chat.id,
+          chat.type,
+          chat.name,
+          chat.description || "",
+          chat.avatar || "",
+          chat.settings || { ...DEFAULT_CHAT_SETTINGS },
+          chat.pinnedMessageId ?? null,
+          chat.pinnedBy ?? null,
+          chat.pinnedUntil ?? null,
+          chat.tags || [],
+          chat.createdBy ?? null,
+          chat.createdAt,
+        ]
+      );
+    }
+
+    for (const member of data.chatMembers || []) {
+      await client.query(
+        "INSERT INTO chat_members (chat_id, user_id, role, created_at) VALUES ($1,$2,$3,$4)",
+        [member.chatId, member.userId, member.role, member.createdAt]
+      );
+    }
+
+    for (const message of data.messages || []) {
+      await client.query(
+        `INSERT INTO messages (id, chat_id, user_id, type, content, audio, file, poll, event, reply, reactions, expire_at, created_at, updated_at, deleted_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [
+          message.id,
+          message.chatId,
+          message.userId,
+          message.type || "text",
+          message.content || "",
+          message.audio || null,
+          message.file || null,
+          message.poll || null,
+          message.event || null,
+          message.reply || null,
+          message.reactions || {},
+          message.expireAt ?? null,
+          message.createdAt,
+          message.updatedAt ?? null,
+          message.deletedAt ?? null,
+        ]
+      );
+    }
+
+    for (const reqItem of data.friendRequests || []) {
+      await client.query(
+        "INSERT INTO friend_requests (id, from_id, to_id, created_at) VALUES ($1,$2,$3,$4)",
+        [reqItem.id, reqItem.fromId, reqItem.toId, reqItem.createdAt]
+      );
+    }
+
+    for (const invite of data.groupInvites || []) {
+      await client.query(
+        "INSERT INTO group_invites (id, chat_id, user_id, invited_by, created_at) VALUES ($1,$2,$3,$4,$5)",
+        [invite.id, invite.chatId, invite.userId, invite.invitedBy, invite.createdAt]
+      );
+    }
+
+    for (const friend of data.friends || []) {
+      await client.query(
+        "INSERT INTO friends (user_id, friend_id, created_at) VALUES ($1,$2,$3)",
+        [friend.userId, friend.friendId, friend.createdAt]
+      );
+    }
+
+    for (const block of data.blocks || []) {
+      await client.query(
+        "INSERT INTO blocks (user_id, blocked_id, created_at, was_friend) VALUES ($1,$2,$3,$4)",
+        [block.userId, block.blockedId, block.createdAt, Boolean(block.wasFriend)]
+      );
+    }
+
+    for (const ban of data.chatBans || []) {
+      await client.query(
+        "INSERT INTO chat_bans (chat_id, user_id, created_at) VALUES ($1,$2,$3)",
+        [ban.chatId, ban.userId, ban.createdAt]
+      );
+    }
+
+    for (const req of data.chatRequests || []) {
+      await client.query(
+        "INSERT INTO chat_requests (chat_id, user_id, created_at) VALUES ($1,$2,$3)",
+        [req.chatId, req.userId, req.createdAt]
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -108,8 +501,8 @@ app.use((req, res, next) => {
   next();
 });
 
-const db = loadDb();
-normalizeDb();
+let db = null;
+let GLOBAL_CHAT_ID = null;
 
 function now() {
   return Date.now();
@@ -186,7 +579,11 @@ function checkRegisterLimit(req) {
   return { limited: false };
 }
 
-function loadDb() {
+async function loadDb() {
+  if (DB_BACKEND === "postgres") {
+    const existing = await readPostgresDb();
+    if (existing) return existing;
+  }
   if (DB_BACKEND === "sqlite") {
     const existing = readSqliteDb();
     if (existing) return existing;
@@ -208,7 +605,9 @@ function loadDb() {
       chatBans: [],
       chatRequests: [],
     };
-    if (DB_BACKEND === "sqlite") {
+    if (DB_BACKEND === "postgres") {
+      await writePostgresDb(fresh);
+    } else if (DB_BACKEND === "sqlite") {
       writeSqliteDb(fresh);
     } else {
       fs.writeFileSync(DB_PATH, JSON.stringify(fresh, null, 2));
@@ -218,7 +617,9 @@ function loadDb() {
   const raw = fs.readFileSync(DB_PATH, "utf-8");
   try {
     const parsed = JSON.parse(raw);
-    if (DB_BACKEND === "sqlite") {
+    if (DB_BACKEND === "postgres") {
+      await writePostgresDb(parsed);
+    } else if (DB_BACKEND === "sqlite") {
       writeSqliteDb(parsed);
     }
     return parsed;
@@ -237,7 +638,9 @@ function loadDb() {
       friends: [],
       blocks: [],
     };
-    if (DB_BACKEND === "sqlite") {
+    if (DB_BACKEND === "postgres") {
+      await writePostgresDb(fresh);
+    } else if (DB_BACKEND === "sqlite") {
       writeSqliteDb(fresh);
     } else {
       fs.writeFileSync(DB_PATH, JSON.stringify(fresh, null, 2));
@@ -463,7 +866,9 @@ function normalizeDb() {
 }
 
 function saveDb() {
-  if (DB_BACKEND === "sqlite") {
+  if (DB_BACKEND === "postgres") {
+    writePostgresDb(db).catch(() => {});
+  } else if (DB_BACKEND === "sqlite") {
     writeSqliteDb(db);
   } else {
     fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
@@ -593,8 +998,6 @@ function ensureGlobalChat() {
   saveDb();
   return chat.id;
 }
-
-const GLOBAL_CHAT_ID = ensureGlobalChat();
 
 function ensureMembership(chatId, userId, role = "member") {
   const exists = db.chatMembers.some(
@@ -2528,6 +2931,19 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Cantares running on http://localhost:${PORT}`);
-});
+async function initDb() {
+  db = await loadDb();
+  normalizeDb();
+  GLOBAL_CHAT_ID = ensureGlobalChat();
+}
+
+initDb()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`Cantares running on http://localhost:${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Error iniciando la base de datos:", error);
+    process.exit(1);
+  });

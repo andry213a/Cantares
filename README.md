@@ -39,10 +39,11 @@ cantares.json
 ```
 
 ## Datos
-Por defecto usa JSON, pero puedes usar SQLite para produccion.
+Por defecto usa JSON, pero puedes usar SQLite o Postgres para produccion.
 
 - JSON: `cantares.json`
 - SQLite: `cantares.sqlite`
+- Postgres: `DATABASE_URL`
 
 ### Variables de entorno
 Archivo de ejemplo: `.env.example`
@@ -50,8 +51,9 @@ Archivo de ejemplo: `.env.example`
 - `PORT=3000`
 - `NODE_ENV=production`
 - `DATA_DIR=.` (ruta donde se guardan archivos)
-- `DB_BACKEND=json` o `sqlite`
+- `DB_BACKEND=json` o `sqlite` o `postgres`
 - `DB_FILE=./cantares.sqlite`
+- `DATABASE_URL=postgres://user:password@host:5432/dbname`
 
 ### Limites anti-spam
 - Registro: 10 intentos por 30 minutos por IP.
@@ -75,8 +77,8 @@ Luego crea un repo en GitHub y sigue las instrucciones para hacer `git push`.
 4. Agrega un **Disco Persistente** y monta en `DATA_DIR` (por ejemplo `/data`).
 5. Variables de entorno recomendadas:
    - `NODE_ENV=production`
-   - `DB_BACKEND=sqlite`
-   - `DB_FILE=/data/cantares.sqlite`
+   - `DB_BACKEND=postgres`
+   - `DATABASE_URL=...`
 6. Render te da un dominio gratis tipo `tu-app.onrender.com`.
 
 Si quieres usar dominio propio, puedes apuntar un dominio comprado a Render desde la seccion de dominios del servicio.
